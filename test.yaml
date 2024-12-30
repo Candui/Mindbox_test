@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-app
+  labels:
+    app: web-app
+spec:
+  replicas: 4 # Минимальное количество подов для отказоустойчивости в пике нагрузки
+  selector:
+    matchLabels:
+      app: web-app
+  template:
+    metadata:
+      labels:
+        app: web-app
+    spec:
+      containers:
+      - name: web-app
+        image: your-image:latest # Замените на имя образа вашего приложения
+        resources:
+          requests:
+            memory: "128Mi" # Приложение стабильно использует 128Mi памяти
+            cpu: "500m"      # Запросы CPU увеличены для учёта высоких пиковых требований на инициализацию
+          limits:
+            memory: "128Mi"
+            cpu: "1"         # Ограничиваем максимальное потребление CPU
+        readinessProbe:
+          httpGet:
+            path: /healthz  # Замените на путь проверки здоровья вашего приложения
+            port: 80
+          initialDelaySeconds: 10 # Учитываем время на инициализацию приложения
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 80
+          initialDelaySeconds: 20
+          periodSeconds: 10
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - web-app
+            topologyKey: kubernetes.io/hostname # Обеспечиваем, что поды размещаются на разных нодах
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone # Распределяем поды по зонам
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app: web-app
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: web-app-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: web-app
+  minReplicas: 1 # Минимум ночью для экономии ресурсов
+  maxReplicas: 6 # Максимум подов для пиковой дневной нагрузки
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50 # Скейлинг при превышении 50% нагрузки CPU
